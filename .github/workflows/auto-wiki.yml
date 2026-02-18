@@ -1,0 +1,37 @@
+name: Otomatik Wiki Jeneratörü
+
+# 1. TETİKLEYİCİ: Ne zaman çalışacak?
+on:
+  pull_request:
+    types:
+      - closed # PR kapatıldığında tetikle
+
+# 2. GÖREVLER: Neler yapılacak?
+jobs:
+  update-changelog:
+    # Sadece PR "Merge" edilerek kapatıldıysa çalış (İptal edildiyse çalışma)
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest # Robotumuzun çalışacağı sanal makine
+    
+    # İzinler: Robotun dosyaya yazıp commit atabilmesi için yetki veriyoruz
+    permissions:
+      contents: write
+
+    steps:
+      # Adım A: Projenin kodlarını sanal makineye indir
+      - name: Kodu İndir (Checkout)
+        uses: actions/checkout@v3
+
+      # Adım B: PR detaylarını al ve CHANGELOG.md dosyasına yaz
+      - name: CHANGELOG'u Güncelle
+        run: |
+          echo "## Yeni Eklenti: ${{ github.event.pull_request.title }}" >> CHANGELOG.md
+          echo "**Tarih:** $(date +'%d-%m-%Y')" >> CHANGELOG.md
+          echo "**Açıklama:** ${{ github.event.pull_request.body }}" >> CHANGELOG.md
+          echo "---" >> CHANGELOG.md
+
+      # Adım C: Değişen CHANGELOG.md dosyasını otomatik olarak Git'e kaydet
+      - name: Değişiklikleri Git'e Kaydet (Auto-Commit)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs: PR detayları CHANGELOG'a otomatik eklendi 🤖"
