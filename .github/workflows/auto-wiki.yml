@@ -21,6 +21,8 @@ jobs:
       # Adım A: Projenin kodlarını sanal makineye indir
       - name: Kodu İndir (Checkout)
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
 
       # Adım B: PR detaylarını al ve CHANGELOG.md dosyasına yaz
       - name: CHANGELOG'u Güncelle
