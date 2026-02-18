@@ -1,69 +1,61 @@
-name: Otomatik Wiki Jeneratörü
+name: AI Code Reviewer 🤖
 
-# 1. TETİKLEYİCİ: Ne zaman çalışacak?
+# 1. TETİKLEYİCİ: PR açıldığında veya PR'a yeni kod eklendiğinde çalışır (Kapatıldığında DEĞİL!)
 on:
   pull_request:
-    types:
-      - closed # PR kapatıldığında tetikle
+    types: [opened, synchronize]
 
 env:
   OLLAMA_MODELS: /home/runner/.ollama/models
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub CLI (gh) aracının yetkisi
 
-# 2. GÖREVLER: Neler yapılacak?
 jobs:
-  update-changelog:
-    # Sadece PR "Merge" edilerek kapatıldıysa çalış (İptal edildiyse çalışma)
-    if: github.event.pull_request.merged == true
-    runs-on: ubuntu-latest # Robotumuzun çalışacağı sanal makine
+  code-review:
+    runs-on: ubuntu-latest
     
-    # İzinler: Robotun dosyaya yazıp commit atabilmesi için yetki veriyoruz
     permissions:
-      contents: write
+      pull-requests: write # Robotun PR'a yorum yazabilmesi için ŞART!
+      contents: read       # Kodu okuyabilmesi için
 
     steps:
-      # Adım A: Projenin kodlarını sanal makineye indir
-      - name: Kodu İndir (Checkout)
+      - name: 📥 Kodu İndir
         uses: actions/checkout@v3
         with:
-          ref: ${{ github.base_ref }}
+          fetch-depth: 0 # SADECE SON HALİNİ DEĞİL, GEÇMİŞİ DE İNDİR (Farkları bulabilmek için)
 
-      - name: 📦 Yapay Zeka Modelini Önbelleğe Al
+      - name: 📦 Yapay Zeka Modelini Önbelleğe Al (Cache)
         uses: actions/cache@v3
         with:
-          # Kaydedilecek klasör
           path: /home/runner/.ollama/models
-          # Bu isme bakarak rafı bulacak
           key: ollama-llama3.2-1b-${{ runner.os }}
 
-      # Adım B: Ollama Kur ve Yerel LLM'i Çalıştır
-      - name: 🤖 Yerel LLM ile PR Özeti Çıkar
+      - name: 🤖 Ollama'yı Kur ve Başlat
         run: |
-          echo "1. Ollama (Yapay Zeka Motoru) Kuruluyor..."
           curl -fsSL https://ollama.com/install.sh | sh
-          
-          echo "2. Ollama Arka Planda Başlatılıyor..."
           ollama serve &
-          sleep 5 # Motorun ısınması için 5 saniye bekle
-          
-          echo "3. Llama 3.2 (1B) Modeli İndiriliyor (Bu yaklaşık 1-2 dakika sürer)..."
+          sleep 5
           ollama pull llama3.2:1b
-          
-          echo "4. Yapay Zekaya PR Bilgileri Gönderiliyor..."
-          # Robotumuza komutu veriyoruz
-          PROMPT="Sen kıdemli bir DevOps mühendisisin. Lütfen şu Pull Request bilgisini oku ve sadece 1-2 cümlelik kısa, profesyonel bir sürüm notu (release note) özeti yaz. Başlık: '${{ github.event.pull_request.title }}', Açıklama: '${{ github.event.pull_request.body }}'."
-          
-          # Ollama'dan cevabı alıp bir değişkene kaydediyoruz
-          AI_SUMMARY=$(ollama run llama3.2:1b "$PROMPT")
-          
-          echo "5. LLM Özeti CHANGELOG dosyasına yazılıyor..."
-          echo "## Yeni PR: ${{ github.event.pull_request.title }}" >> CHANGELOG.md
-          echo "**Yapay Zeka Özeti:** $AI_SUMMARY" >> CHANGELOG.md
-          echo "**Tarih:** $(date +'%d-%m-%Y')" >> CHANGELOG.md
-          echo "---" >> CHANGELOG.md
 
-      # Adım C: Değişen CHANGELOG.md dosyasını otomatik olarak Git'e kaydet
-      - name: Değişiklikleri Git'e Kaydet (Auto-Commit)
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "docs: PR detayları CHANGELOG'a otomatik eklendi 🤖"
-          branch: main
+      - name: 🔍 Değişen Kodları (Git Diff) Çıkar
+        run: |
+          # GitHub CLI kullanarak sadece bu PR'da değişen satırları alıp bir dosyaya yazıyoruz
+          gh pr diff ${{ github.event.pull_request.number }} > diff.txt
+          echo "Değişen kodlar başarıyla çıkarıldı!"
+
+      - name: 🧠 AI'a Kodu İncelet (Code Review)
+        run: |
+          # Değişen kodları okuyoruz
+          DIFF_CONTENT=$(cat diff.txt)
+          
+          # LLM'e vereceğimiz sıkı talimat (Prompt Engineering)
+          PROMPT="Sen kıdemli bir yazılım mühendisisin ve Code Review yapıyorsun. Aşağıdaki Git Diff (değişen kodlar) çıktısını incele. Sadece değişen satırlara (başında + veya - olan) odaklan. Kodda bir hata, mantık hatası veya iyileştirme fırsatı görüyorsan Türkçe olarak kısa, profesyonel ve yapıcı bir eleştiri yaz. Eğer her şey mükemmelse 'Kod harika görünüyor, eline sağlık.' de. İşte kod:
+          
+          $DIFF_CONTENT"
+          
+          # Yapay zekadan cevabı alıyoruz ve bir metin dosyasına kaydediyoruz
+          ollama run llama3.2:1b "$PROMPT" > ai_review.txt
+
+      - name: 💬 Sonucu PR'a Yorum Olarak At
+        run: |
+          # GitHub CLI ile AI'ın yazdığı metni PR'a yorum olarak gönderiyoruz!
+          gh pr comment ${{ github.event.pull_request.number }} --body-file ai_review.txt
